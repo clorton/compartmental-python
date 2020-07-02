@@ -1,0 +1,6 @@
+numpy=1.19.0
+scipy==1.5.0
+matplotlib==3.2.2
+pythonnet==2.5.1
+gillespy2==1.4.2
+StochPy==2.3
