@@ -1,6 +1,6 @@
 # SSA/Compartmental Modeling with Python
 
-Compare GillesPy2 and StochPy with IDM CMS.
+Compare GillesPy2 and StochPy with IDM CMS for disease modeling.
 
 ## GillesPy2
 
