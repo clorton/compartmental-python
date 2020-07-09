@@ -334,8 +334,12 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--stochpy", default=True, action="store_false")
     parser.add_argument("-b", "--binary", default=CMS_PATH, help="Path containing 'compartments.exe'")
     parser.add_argument("-t", "--tauleaping", default=False, action="store_true")
+    parser.add_argument("-r", "--realizations", type=int, default=REALIZATIONS)
+    parser.add_argument("-l", "--legend", default=True, action="store_false")
 
     args = parser.parse_args()
+
+    REALIZATIONS = args.realizations
 
     if args.cms:
         if args.binary is None:
