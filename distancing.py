@@ -12,7 +12,7 @@ import stochpy
 import tempfile
 
 from gillespy2.solvers import NumPySSASolver
-from gillespy2.solvers import TauLeapingSolver
+from gillespy2.solvers import TauHybridSolver
 
 
 R0 = 2.4
@@ -38,21 +38,21 @@ TIMESTEPS = (END_TIME - START_TIME) + 1
 REALIZATIONS = 10
 
 
-def main(do_cms, do_gillespy, do_stochpy, tauleaping):
+def main(do_cms, do_gillespy, do_stochpy):
 
     if do_cms:
-        run_cms(tauleaping)
+        run_cms()
 
     if do_gillespy:
-        run_gillespy(tauleaping)
+        run_gillespy()
 
     if do_stochpy:
-        run_stochpy(tauleaping)
+        run_stochpy()
 
     return
 
 
-def run_cms(tauleaping):
+def run_cms():
 
     emodl = f"""
     (import (rnrs) (emodl cmslib))
@@ -70,10 +70,12 @@ def run_cms(tauleaping):
     (param Ka {(1-SYMPTOMATIC_FRACTION)/MEAN_INCUBATION_PERIOD})
     (param Ks {SYMPTOMATIC_FRACTION})
     (param Kr {1/MEAN_INFECTIOUS_PERIOD})
+    (param V 0)
     (reaction transmission (S) (E)     (/ (* Ki S I) (+ S E I R)))
     (reaction infectious_a (E) (I A C) (* Ka E))
     (reaction infectious_s (E) (I Y C) (* Ky E))
     (reaction recovery     (I) (R)     (* Kr I))
+    (state-event sia (> Y 100) ((Ki {0.8/MEAN_INFECTIOUS_PERIOD})))
     (observe susceptible  S)
     (observe exposed      E)
     (observe symptomatic  Y)
@@ -87,7 +89,7 @@ def run_cms(tauleaping):
     model = EmodlLoader.LoadEMODLModel(str(emodl))
 
     config = {
-        "solver": "SSA" if not tauleaping else "TAU",
+        "solver": "SSA",
         "runs": REALIZATIONS,
         "duration": END_TIME-START_TIME,
         "samples": TIMESTEPS,
@@ -96,7 +98,7 @@ def run_cms(tauleaping):
     cfg.CurrentConfiguration = cfg.ConfigurationFromString(json.dumps(config))
 
     solver = solvers.CreateSolver(config["solver"], model, config["runs"], config["duration"], config["samples"])
-
+    t1 = datetime.now()
     """
     Solve() is a wrapper for:
         for (int curRealization = 0; curRealization < numRealizations; curRealization++)
@@ -124,7 +126,6 @@ def run_cms(tauleaping):
         }
     """
 
-    t1 = datetime.now()
     solver.Solve()
     t2 = datetime.now()
 
@@ -160,8 +161,9 @@ class SEIR(gillespy2.Model):
         k_a = gillespy2.Parameter(name="Ka", expression=(1-SYMPTOMATIC_FRACTION)/MEAN_INCUBATION_PERIOD)
         k_s = gillespy2.Parameter(name="Ks", expression=SYMPTOMATIC_FRACTION)
         k_r = gillespy2.Parameter(name="Kr", expression=1/MEAN_INFECTIOUS_PERIOD)
+        vaccinated = gillespy2.Parameter(name="vaccinated", expression=0)
         # self.add_parameter([k_i, k_e, k_s, k_r])
-        self.add_parameter([k_i, k_y, k_a, k_s, k_r])
+        self.add_parameter([k_i, k_y, k_a, k_s, k_r, vaccinated])
         transmission = gillespy2.Reaction(name="transmission",
                                           propensity_function="Ki*susceptible*infectious/(susceptible+exposed+infectious+recovered)",
                                           reactants={s: 1}, products={e: 1})
@@ -174,18 +176,25 @@ class SEIR(gillespy2.Model):
         recovery = gillespy2.Reaction(name="recovery", massaction=True, rate=k_r,
                                       reactants={i: 1}, products={r: 1})
         self.add_reaction([transmission, transmissive_a, transmissive_s, recovery])
+
+        initiate_distancing = gillespy2.EventAssignment(variable=k_i, expression=f"{0.8/MEAN_INFECTIOUS_PERIOD}")
+        trigger = gillespy2.EventTrigger(expression="symptomatic > 100", initial_value=False, persistent=True)
+        sia = gillespy2.Event("distancing", delay="0", assignments=[initiate_distancing],
+                              trigger=trigger, use_values_from_trigger_time=False)
+        self.add_event([sia])
+
         self.timespan(numpy.linspace(0, 180, 181))
 
         return
 
 
-def run_gillespy(tauleaping):
+def run_gillespy():
 
     t0 = datetime.now()
     model = SEIR()
     t1 = datetime.now()
-    results = model.run(solver=NumPySSASolver if not tauleaping else TauLeapingSolver,
-                        number_of_trajectories=REALIZATIONS)
+    # NumPySSASolver does not support events
+    results = model.run(solver=TauHybridSolver, number_of_trajectories=REALIZATIONS)
     t2 = datetime.now()
 
     print(f"Time for model construction: {t1-t0}")
@@ -208,7 +217,7 @@ def run_gillespy(tauleaping):
     return
 
 
-def run_stochpy(tauleaping):
+def run_stochpy():
 
     pysces = """
     Modelname: stochpy_seir
@@ -288,6 +297,10 @@ def run_stochpy(tauleaping):
     # assignment to the model. Assignments have the general form <par> = <formula>. Events have access to the
     # "current" simulation time using the _TIME_ symbol
 
+    Event: sia, Y > 100, 0 {
+        Ki = 0.32
+    }
+
 """
 
     t0 = datetime.now()
@@ -299,18 +312,14 @@ def run_stochpy(tauleaping):
     try:
         model = stochpy.SSA(model_file=path.name, dir=str(path.parent), end=END_TIME, trajectories=REALIZATIONS)
         t1 = datetime.now()
-        model.DoStochSim(end=180,
-                         mode="time",
-                         method="direct" if not tauleaping else "tauleap",
-                         trajectories=REALIZATIONS)
+        model.DoStochSim(end=180, mode='time', method='tauleap', trajectories=REALIZATIONS, epsilon=0.025)
         t2 = datetime.now()
 
         print(f"Time for model construction: {t1 - t0}")
         print(f"Time for model execution ({REALIZATIONS} trajectories): {t2 - t1}")
 
         for t in range(REALIZATIONS):
-            if REALIZATIONS > 1:
-                model.GetTrajectoryData(t+1)
+            model.GetTrajectoryData(t+1)
             data = model.data_stochsim
             for i in range(data.species.shape[1]):
                 plt.plot(data.time, data.species[:, i], label=data.species_labels[i])
@@ -333,7 +342,6 @@ if __name__ == "__main__":
     parser.add_argument("-g", "--gillespy", default=True, action="store_false")
     parser.add_argument("-s", "--stochpy", default=True, action="store_false")
     parser.add_argument("-b", "--binary", default=CMS_PATH, help="Path containing 'compartments.exe'")
-    parser.add_argument("-t", "--tauleaping", default=False, action="store_true")
 
     args = parser.parse_args()
 
@@ -348,4 +356,4 @@ if __name__ == "__main__":
             from compartments import Configuration as cfg
             from compartments.emod.utils import SolverFactory as solvers
 
-    main(args.cms, args.gillespy, args.stochpy, args.tauleaping)
+    main(args.cms, args.gillespy, args.stochpy)

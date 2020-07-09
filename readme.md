@@ -23,12 +23,12 @@ Compare GillesPy2 and StochPy with IDM CMS for disease modeling.
 
 |   Species   |   Description            | Initial Value |
 |:-----------:|:------------------------:|:-------------:|
-| **S**       | **S**usceptible          | 9999          |
+| **S**       | **S**usceptible          | 9998          |
 | **E**       | **E**xposed/incubating   | 0             |
 | **Y**       | s**Y**mptomatic (total)  | 0             |
 | **A**       | **A**symptomatic (total) | 0             |
-| **I**       | **I**nfectious           | 1             |
-| **C**       | **C**ases (total)        | 1             |
+| **I**       | **I**nfectious           | 2             |
+| **C**       | **C**ases (total)        | 2             |
 | **R**       | **R**ecovered/removed    | 0             |
 
 
